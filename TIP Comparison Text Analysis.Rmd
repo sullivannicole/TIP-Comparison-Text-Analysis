@@ -1,0 +1,21 @@
+---
+title: "TIP Comparison Text Analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(RODBC)
+library(openxlsx)
+```
+
+```{r}
+
+conn <- odbcDriverConnect("Driver={Microsoft Access Database (*.mdb, *.accdb)};DBQ=2019_Final.mdb")
+conn <- odbcConnect("TIP_2019_Final")
+
+
+# db <- "N:\\MTS\\Working\\TABTAC\\TIP\\DataComparisonProject\2019_Final.accdb"
+#  con2 <- odbcConnectAccess2007(db)
+```
