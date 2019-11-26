@@ -8,14 +8,80 @@ knitr::opts_chunk$set(echo = TRUE)
 
 library(RODBC)
 library(openxlsx)
+library(tidyverse)
+library(compareDF)
 ```
 
+Read in 2019 draft and 2019 final data.
+
 ```{r}
+#attempt <- RODBC::odbcConnect("TIP_2019_Final")
 
-conn <- odbcDriverConnect("Driver={Microsoft Access Database (*.mdb, *.accdb)};DBQ=2019_Final.mdb")
-conn <- odbcConnect("TIP_2019_Final")
+# Draft database data
+draft_19_path <- "N:\\MTS\\Working\\TABTAC\\TIP\\DataComparisonProject\\2019Draft.accdb"
+draft_19_conn <- odbcConnectAccess2007(draft_19_path)
+sqlTables(draft_19_conn, tableType = "TABLE")$TABLE_NAME # Check available tables
+draft_19 <- RODBC::sqlQuery(draft_19_conn, 'select * from AllData')
 
+# Final database data
+final_19_path <- "N:\\MTS\\Working\\TABTAC\\TIP\\DataComparisonProject\\2019_Final.accdb"
+final_19_conn <- odbcConnectAccess2007(final_19_path)
+sqlTables(final_19_conn, tableType = "TABLE")$TABLE_NAME # Check available tables
+final_19 <- RODBC::sqlQuery(final_19_conn, 'select * from AllData')
 
-# db <- "N:\\MTS\\Working\\TABTAC\\TIP\\DataComparisonProject\2019_Final.accdb"
-#  con2 <- odbcConnectAccess2007(db)
+odbcCloseAll()
+```
+
+Take a look at projects that show up in **both** draft TIP and final TIP in 2019 (ie common to both datasets).
+
+```{r}
+vars <- c("Projnum", "Description", "Project Total")
+
+draft_final_19_full <- inner_join(draft_19, final_19, by = "Projnum")
+
+# Alphabetize dataframe for look-through                                  
+comparison_full_19 <- draft_final_19_full %>%
+  select(noquote(order(colnames(draft_final_19_full))))
+
+# Select variables needed for now
+draft_19_pared <- draft_19 %>%
+  dplyr::select(!!vars) %>%
+  rename(Draft_desc = Description,
+         Draft_total = `Project Total`)
+
+final_19_pared <- final_19 %>%
+  dplyr::select(!!vars) %>%
+  rename(Final_desc = Description,
+         Final_total = `Project Total`)
+
+draft_final_19 <- inner_join(draft_19_pared, final_19_pared, by = "Projnum")
+
+# Remove perfect matches
+differing <- draft_final_19 %>%
+  mutate(Desc_matches_exactly = ifelse(as.character(Draft_desc) == as.character(Final_desc), 1, 0),
+         Total_matches_exactly = ifelse(Draft_total == Final_total, 1, 0),
+         Perfect_match = ifelse(Desc_matches_exactly == 1 & Total_matches_exactly == 1, 1, 0)) %>%
+  filter(Perfect_match == 0)
+
+# Check how many differences
+differing %>%
+  group_by(Desc_matches_exactly, Total_matches_exactly) %>%
+  count()
+
+# More differences with totals than with descriptions
+
+# Look at differences with totals, but same description
+totdiff_descmatch <- differing %>%
+  filter(Desc_matches_exactly == 1 & Total_matches_exactly == 0) %>%
+  select(-Desc_matches_exactly, -Total_matches_exactly, -Perfect_match, -Final_desc, -Draft_desc) %>%
+  mutate(Difference_in_totals_gross = Final_total-Draft_total,
+         Difference_in_total_percent = (Final_total-Draft_total)/Draft_total*100)
+
+tot_diff_ids <- totdiff_descmatch %>% select(Projnum)
+
+tot_diff_draft19 <- inner_join(tot_diff_ids, draft_19, by = "Projnum")
+tot_diff_final19 <- inner_join(tot_diff_ids, final_19, by = "Projnum")
+names(draft_19)
+
+ctable_tot_diff = compare_df(tot_diff_draft19, tot_diff_final19, c("Projnum"))
 ```
