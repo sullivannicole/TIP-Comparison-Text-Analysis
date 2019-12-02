@@ -10,9 +10,16 @@ library(RODBC)
 library(openxlsx)
 library(tidyverse)
 library(compareDF)
+library(htmltools)
 ```
 
-Read in 2019 draft and 2019 final data.
+## Read in 2019 draft and 2019 final data.
+
+**Note that in order to use the RODBC package you must have a 32-bit driver installed, and you must be using the 32-bit version of R/RStudio.**
+
+* To check what version of R you're using: Tools > Global Options.
+
+The R Version should read [Default][32-bit] (unless you're using a non-default 32-bit verison).  All packages will need to be re-installed with the 32-bit R.  Once packages are installed, one may switch back and forth between versions as preferred.
 
 ```{r}
 #attempt <- RODBC::odbcConnect("TIP_2019_Final")
@@ -32,7 +39,7 @@ final_19 <- RODBC::sqlQuery(final_19_conn, 'select * from AllData')
 odbcCloseAll()
 ```
 
-Take a look at projects that show up in **both** draft TIP and final TIP in 2019 (ie common to both datasets).
+## To start, take a look at only projects that show up in **both** draft TIP and final TIP in 2019 (ie common to both datasets).
 
 ```{r}
 vars <- c("Projnum", "Description", "Project Total")
@@ -68,20 +75,162 @@ differing %>%
   group_by(Desc_matches_exactly, Total_matches_exactly) %>%
   count()
 
-# More differences with totals than with descriptions
+# There are more differences with totals than with descriptions; check out differences in totals first
 
-# Look at differences with totals, but same description
+```
+
+## Look at projects where there's no difference in text description from draft to final, but there *is* a difference in project totals.  What other columns differ between the draft and final (ie why did the total change)?
+
+```{r}
+# Look at differences with totals, but same description; what's the percent difference in total?  If it's minimal, may not be worth pursuing
 totdiff_descmatch <- differing %>%
   filter(Desc_matches_exactly == 1 & Total_matches_exactly == 0) %>%
   select(-Desc_matches_exactly, -Total_matches_exactly, -Perfect_match, -Final_desc, -Draft_desc) %>%
   mutate(Difference_in_totals_gross = Final_total-Draft_total,
          Difference_in_total_percent = (Final_total-Draft_total)/Draft_total*100)
 
+# Some project totals differ by up to +300%.  Pursue further differences
+
 tot_diff_ids <- totdiff_descmatch %>% select(Projnum)
 
 tot_diff_draft19 <- inner_join(tot_diff_ids, draft_19, by = "Projnum")
 tot_diff_final19 <- inner_join(tot_diff_ids, final_19, by = "Projnum")
-names(draft_19)
 
-ctable_tot_diff = compare_df(tot_diff_draft19, tot_diff_final19, c("Projnum"))
+# Find out which columns are different from draft to final; these will need to be dropped to use compare_df
+draft_19_names <- names(draft_19)
+final_19_names <- names(final_19)
+
+names_19 <- list(draft = draft_19_names, final = final_19_names) # nested list of 2
+unique_names <- unique(unlist(names_19)) # unique names across both draft and final
+purrr::map(names_19, setdiff, x = unique_names) # where does draft differ from final and final from draft?
+
+# Set discrepant columns
+draft_remove <- setdiff(x = draft_19_names, y = final_19_names)
+final_remove <- setdiff(x = final_19_names, y = draft_19_names)
+
+# Remove discrepant columns
+tot_draft19 <- tot_diff_draft19 %>%
+  dplyr::select(-!!draft_remove)
+
+tot_final19 <- tot_diff_final19 %>%
+  dplyr::select(-!!final_remove)
+
+# Compare differences between all columns for rows that have differing totals, but not differing text descriptions - note that both dataframes are included in html output as ordinal lines
+ctable_tot_diff <- compare_df(tot_final19, tot_draft19, c("Projnum"), keep_unchanged_cols = F)
+
+# Input order of tables here (used in tidying up the table)
+first_table <- "Final 2019"
+second_table <- "Draft 2019"
+
+save_html(ctable_tot_diff$html_output, "Draft to Final 2019 Projects with Differing Totals.html")
+
+# Reformat table so comparisons are side by side
+diff_format <- ctable_tot_diff$comparison_df %>%
+  group_by(Projnum) %>%
+  mutate(Source = rep(c(first_table, second_table))) %>%
+  ungroup() %>%
+  dplyr::select(Source, Projnum, everything()) %>%
+  gather(2:length(ctable_tot_diff$comparison_df)+1, key = "Column", value = "Value") %>%
+  unite(Variable, Column, Source) %>%
+  spread(Variable, value = Value)
+
+# Create matrix (called 'col_comparisons') of columns to be compared
+compare <- as_tibble(colnames(diff_format %>% dplyr::select(-Projnum))) %>%
+  rename(Col = value) %>%
+  mutate(ID = row_number()) %>%
+  mutate(compare_row = ifelse(ID %% 2 == 0, ID-1, ID+1))
+
+col_comparisons <- full_join(compare, compare, by = c("ID" = "compare_row")) %>%
+  filter(ID %% 2 == 0) %>%
+  dplyr::select(Col.x, Col.y)
+
+# var1 <- col_comparisons$Col.x[[1]]
+# var2 <- col_comparisons$Col.y[[1]]
+# Var1 <- sym(var1)
+# Var2 <- sym(var2)
+# prefix <- gsub("_.*", "", x = Var1)
+# 
+# compare_vars <- diff_format %>%
+#   select(var1, var2) %>%
+#   mutate(Matches = ifelse(!!Var1 == !!Var2, "Same", "Differs"))
+# 
+# columns <- c(var1, var2, prefix)
+# 
+# colnames(compare_vars) <- columns
+
+# Create function to find differences between pairs of columns
+compare_cols <- function(comparison_row) {
+var1 <- col_comparisons$Col.x[[comparison_row]]
+var2 <- col_comparisons$Col.y[[comparison_row]]
+Var1 <- sym(var1)
+Var2 <- sym(var2)
+prefix <- gsub("_.*", "", x = Var1)
+
+compare_vars <- diff_format %>%
+  select(var1, var2) %>%
+  mutate(Matches = ifelse(!!Var1 == !!Var2, "Same", "Differs"))
+
+columns <- c(var1, var2, prefix)
+
+colnames(compare_vars) <- columns
+
+return(compare_vars)
+}
+
+compare_cols(7)
+
+# Loop through compare_cols function to find differences between all columns
+comparisons_num <- c(1:nrow(col_comparisons))
+comparisons <- vector("list", length(comparisons_num))
+
+for (i in seq_along(comparisons_num)) {
+  comparisons[[i]] <- compare_cols(i)
+  
+}
+
+# Save output as dataframe, add project number and rearrange
+comparisons_df <- do.call(cbind, comparisons)
+comparisons_full <- cbind(comparisons_df, as_tibble(diff_format$Projnum))
+comparisons_tidy <- comparisons_full %>%
+  rename(Projnum = value) %>%
+  dplyr::select(Projnum, everything())
+
+```
+
+## Format the comparison table with highlights.
+
+```{r}
+library(formattable)
+
+
+color.picker <- function(z){
+  if(is.na(z)){return("black")}
+  else if(z <= 20){return("red")}
+  else if( z > 20 & z <= 80){return("darkorange")}
+  else {return("darkgreen")}
+}
+ 
+bg.picker <- function(z){
+  if(is.na(z)){return("black")}
+  else if(z <= 20){return("pink")}
+  else if( z > 20 & z <= 80){return("yellow")}
+  else {return("lightgreen")}
+}
+ 
+my.data <- as.data.frame(my.data)
+ 
+formattable(comparisons_df, list(
+  CPOE = color_tile("white", "green"),
+  Verbal = color_tile("white", "red"),
+  Written = color_tile("white", "red"),
+  Cosigned = formatter("span",
+       style = x ~ style(display = "block",
+       "border-radius" = "4px",
+       "padding-right" = "4px",
+       color = sapply(x,color.picker),
+       "background-color" = sapply(x,bg.picker)),
+       x ~ sprintf("%.2f (rank: %02d)", x, rank(-x)))
+))
+
+formattable(comparisons_df)
 ```
