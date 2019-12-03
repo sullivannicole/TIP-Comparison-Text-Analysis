@@ -11,6 +11,8 @@ library(openxlsx)
 library(tidyverse)
 library(compareDF)
 library(htmltools)
+library(formattable)
+library(htmlwidgets)
 ```
 
 ## Read in 2019 draft and 2019 final data.
@@ -116,21 +118,22 @@ tot_final19 <- tot_diff_final19 %>%
   dplyr::select(-!!final_remove)
 
 # Compare differences between all columns for rows that have differing totals, but not differing text descriptions - note that both dataframes are included in html output as ordinal lines
-ctable_tot_diff <- compare_df(tot_final19, tot_draft19, c("Projnum"), keep_unchanged_cols = F)
+ctable_tot_diff <- compare_df(tot_draft19, tot_final19, c("Projnum"), keep_unchanged_cols = F)
 
 # Input order of tables here (used in tidying up the table)
-first_table <- "Final 2019"
-second_table <- "Draft 2019"
+first_table <- "Draft 2019"
+second_table <- "Final 2019"
 
 save_html(ctable_tot_diff$html_output, "Draft to Final 2019 Projects with Differing Totals.html")
 
 # Reformat table so comparisons are side by side
 diff_format <- ctable_tot_diff$comparison_df %>%
+  dplyr::select(-chng_type) %>%
   group_by(Projnum) %>%
   mutate(Source = rep(c(first_table, second_table))) %>%
   ungroup() %>%
   dplyr::select(Source, Projnum, everything()) %>%
-  gather(2:length(ctable_tot_diff$comparison_df)+1, key = "Column", value = "Value") %>%
+  gather(3:length(ctable_tot_diff$comparison_df), key = "Column", value = "Value") %>%
   unite(Variable, Column, Source) %>%
   spread(Variable, value = Value)
 
@@ -143,20 +146,6 @@ compare <- as_tibble(colnames(diff_format %>% dplyr::select(-Projnum))) %>%
 col_comparisons <- full_join(compare, compare, by = c("ID" = "compare_row")) %>%
   filter(ID %% 2 == 0) %>%
   dplyr::select(Col.x, Col.y)
-
-# var1 <- col_comparisons$Col.x[[1]]
-# var2 <- col_comparisons$Col.y[[1]]
-# Var1 <- sym(var1)
-# Var2 <- sym(var2)
-# prefix <- gsub("_.*", "", x = Var1)
-# 
-# compare_vars <- diff_format %>%
-#   select(var1, var2) %>%
-#   mutate(Matches = ifelse(!!Var1 == !!Var2, "Same", "Differs"))
-# 
-# columns <- c(var1, var2, prefix)
-# 
-# colnames(compare_vars) <- columns
 
 # Create function to find differences between pairs of columns
 compare_cols <- function(comparison_row) {
@@ -177,7 +166,7 @@ colnames(compare_vars) <- columns
 return(compare_vars)
 }
 
-compare_cols(7)
+#compare_cols(7)
 
 # Loop through compare_cols function to find differences between all columns
 comparisons_num <- c(1:nrow(col_comparisons))
@@ -188,7 +177,7 @@ for (i in seq_along(comparisons_num)) {
   
 }
 
-# Save output as dataframe, add project number and rearrange
+# Convert output to dataframe, add project number and rearrange
 comparisons_df <- do.call(cbind, comparisons)
 comparisons_full <- cbind(comparisons_df, as_tibble(diff_format$Projnum))
 comparisons_tidy <- comparisons_full %>%
@@ -200,37 +189,58 @@ comparisons_tidy <- comparisons_full %>%
 ## Format the comparison table with highlights.
 
 ```{r}
-library(formattable)
-
-
+# Text color
 color.picker <- function(z){
-  if(is.na(z)){return("black")}
-  else if(z <= 20){return("red")}
-  else if( z > 20 & z <= 80){return("darkorange")}
-  else {return("darkgreen")}
+  if(is.na(z)){return("grey")}
+  else if(z == "Differs"){return("orange")}
+  else if( z == "Same"){return("grey")}
+  else {return("grey")}
 }
- 
-bg.picker <- function(z){
-  if(is.na(z)){return("black")}
-  else if(z <= 20){return("pink")}
-  else if( z > 20 & z <= 80){return("yellow")}
-  else {return("lightgreen")}
-}
- 
-my.data <- as.data.frame(my.data)
- 
-formattable(comparisons_df, list(
-  CPOE = color_tile("white", "green"),
-  Verbal = color_tile("white", "red"),
-  Written = color_tile("white", "red"),
-  Cosigned = formatter("span",
-       style = x ~ style(display = "block",
-       "border-radius" = "4px",
-       "padding-right" = "4px",
-       color = sapply(x,color.picker),
-       "background-color" = sapply(x,bg.picker)),
-       x ~ sprintf("%.2f (rank: %02d)", x, rank(-x)))
-))
 
-formattable(comparisons_df)
+# Background color
+bg.picker <- function(z){
+  if(is.na(z)){return("white")}
+  else if(z == "Differs"){return("yellow")}
+  else if(z == "Same"){return("white")}
+  else {return("white")}
+}
+
+# Assign conditional formatting
+cond_color <- formatter("span",
+                              style = x ~ style(display = "block",
+                                                "border-radius" = "4px",
+                                                "padding-right" = "4px",
+                                                color = sapply(x, color.picker),
+                                                "background-color" = sapply(x, bg.picker)))
+
+# Format table with conditional formatting
+formattable(comparisons_tidy, list(
+            `AC_Final 2019` = formatter("span",
+                                        style = AC ~ ifelse(AC == "Differs", "background-color: yellow", "background-color: red"))))
+
+# Create 
+comparison_cols <- enframe(colnames(comparisons_tidy))
+
+cols_unique <- comparison_cols %>%
+  dplyr::select(value) %>%
+  filter(value != "Projnum") %>%
+  separate(value, into = c("Variable", "Suffix"), sep = "_") %>%
+  dplyr::select(Variable) %>%
+  unique()
+
+table_cols <- vector("list", length(cols_unique))
+
+for (i in 1:nrow(cols_unique)) {
+  table_cols[[i]] <- cond_color
+  
+}
+
+names(table_cols) <- cols_unique$Variable
+
+FT <- formattable(comparisons_tidy, table_cols)
+
+saveWidget(as.htmlwidget(FT), "Project_totals_differ.html", title = "Projects with differing totals, but no difference in descriptions")
 ```
+
+
+
