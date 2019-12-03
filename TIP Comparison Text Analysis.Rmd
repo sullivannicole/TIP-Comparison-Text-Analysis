@@ -9,10 +9,11 @@ knitr::opts_chunk$set(echo = TRUE)
 library(RODBC)
 library(openxlsx)
 library(tidyverse)
-library(compareDF)
+library(compareDF) # for comparing 2 df's with same columns
 library(htmltools)
-library(formattable)
-library(htmlwidgets)
+library(formattable) # highlighting table
+library(htmlwidgets) # saving formatted table
+library(tm) # for stop words
 ```
 
 ## Read in 2019 draft and 2019 final data.
@@ -242,5 +243,29 @@ FT <- formattable(comparisons_tidy, table_cols)
 saveWidget(as.htmlwidget(FT), "Project_totals_differ.html", title = "Projects with differing totals, but no difference in descriptions")
 ```
 
+## Look at projects where there *is* a difference in text description from draft to final.  Remove stop words to eliminate insignificant changes.
 
+```{r}
+
+desc_differs <- differing %>%
+  filter(Desc_matches_exactly == "0")
+
+stop_words <- stopwords(kind = "en")
+
+descriptions_tidy <- desc_differs %>%
+  mutate(Draft_desc = trimws(tolower(Draft_desc)),
+         Draft_desc = str_replace_all(Draft_desc, "\\*+", " "),
+         Draft_desc = str_replace_all(Draft_desc, "\\-+", " "),
+         Draft_desc = str_replace_all(Draft_desc,"[ ]+", " "), #get rid of runs of WS
+         Final_desc = trimws(tolower(Final_desc)),
+         Final_desc = str_replace_all(Final_desc, "\\*", " "),
+         Final_desc = str_replace_all(Final_desc, "\\-+", " "),
+         Final_desc = str_replace_all(Final_desc, "[ ]+", " "), # get rid of runs of WS
+         Same_after_tidy = ifelse(as.character(Draft_desc) == as.character(Final_desc), 1, 0)) %>%
+  filter(Same_after_tidy == 0) %>%
+  dplyr::select(Projnum, Draft_desc, Final_desc, Draft_total, Final_total)
+
+write_csv(descriptions_tidy, "Text descriptions differ.csv")
+
+```
 
