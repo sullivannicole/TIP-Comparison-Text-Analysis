@@ -144,7 +144,7 @@ compare <- as_tibble(colnames(diff_format %>% dplyr::select(-Projnum))) %>%
   mutate(compare_row = ifelse(ID %% 2 == 0, ID-1, ID+1))
 
 col_comparisons <- full_join(compare, compare, by = c("ID" = "compare_row")) %>%
-  filter(ID %% 2 == 0) %>%
+  filter(ID %% 2 != 0) %>%
   dplyr::select(Col.x, Col.y)
 
 # Create function to find differences between pairs of columns
