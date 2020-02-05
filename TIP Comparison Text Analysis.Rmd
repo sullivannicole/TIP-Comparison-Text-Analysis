@@ -92,6 +92,8 @@ totdiff_descmatch <- differing %>%
   mutate(Difference_in_totals_gross = Final_total-Draft_total,
          Difference_in_total_percent = (Final_total-Draft_total)/Draft_total*100)
 
+write_csv(totdiff_descmatch, "Differing Proj Totals, Same Descs.csv")
+
 # Some project totals differ by up to +300%.  Pursue further differences
 
 tot_diff_ids <- totdiff_descmatch %>% select(Projnum)
