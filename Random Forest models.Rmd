@@ -1,0 +1,52 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(caret)
+
+tagged <- read_csv("Differing Descriptions Tagging (003).csv") %>%
+  mutate(Change_importance = ifelse(Change_importance == 0, "Non.signif", "Signif")) %>%
+  mutate(Addition_in_final = ifelse(is.na(Addition_in_final), "None", Addition_in_final),
+         Deletion_from_draft = ifelse(is.na(Deletion_from_draft), "None", Deletion_from_draft))
+
+set.seed(489)
+train_partition <- createDataPartition(
+  y = tagged$Change_importance,
+  p = 0.8,
+  list = F
+)
+
+train_data <- tagged[train_partition,]
+test_data <- tagged[-train_partition,]
+
+# ---------------------------
+# Training PLS model
+# ---------------------------
+
+# Partial least squares discriminant analysis model, tuned over retained PLS components
+pls_mod <- train(
+  Change_importance ~ Draft_total + Final_total + match_ratio,
+  data = train_data,
+  method = "pls",
+  preProc = c("center", "scale"), # Center/scale IVs for training
+  trControl = trainControl(method = "repeatedcv", repeats = 3, classProbs = T, summaryFunction = twoClassSummary), # cross-fold validation instead of bootstrapping; use 10 folds, repeated 3 times
+  tuneLength = 15,
+  metric = "ROC"
+)
+
+pls_mod$results
+
+ggplot(pls_mod) # Optimal ROC with 2 components
+
+# ---------------------------
+# Testing PLS model
+# ---------------------------
+
+pls_test_mod <- predict(pls_mod, newdata = test_data)
+pls_preds <- predict(pls_mod, newdata = test_data, type = "prob")
+
+confusionMatrix(data = pls_test_mod, as.factor(test_data$Change_importance)) # Predicts with 80% accuracy
+```
